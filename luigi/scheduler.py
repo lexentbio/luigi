@@ -45,7 +45,7 @@ from luigi import configuration
 from luigi import notifications
 from luigi import parameter
 from luigi import task_history as history
-from luigi.task_status import DISABLED, DONE, FAILED, PENDING, RUNNING, SUSPENDED, UNKNOWN, \
+from luigi.task_status import NEW, DISABLED, DONE, FAILED, PENDING, RUNNING, SUSPENDED, UNKNOWN, \
     BATCH_RUNNING
 from luigi.task import Config
 
@@ -520,6 +520,16 @@ class SimpleTaskState(object):
         task.time_running = time.time()
 
     def set_status(self, task, new_status, config=None):
+        logger.debug("Transitioning Task {} from {} to {}.".format(task.id, task.status, new_status))
+        if new_status == NEW:
+            if task.status == UNKNOWN:
+                # This task has been created previously as a placeholder dependency while adding it's parent
+                new_status = PENDING
+            else:
+                # This is the first time the worker is seeing this task but it has already been queueud by another worker on scheduler.
+                # So don't update the status.
+                new_status = task.status
+
         if new_status == FAILED:
             assert config is not None
 
@@ -887,6 +897,26 @@ class Scheduler(object):
             task.workers.add(worker_id)
             self._state.get_worker(worker_id).tasks.add(task)
             task.runnable = runnable
+
+        # TODO: Replace the dict interface with serializable task object.
+        return {
+            'task': {
+                'task_id':           task.id,
+                'status':       task.status,
+                'runnable':     task.runnable,
+                'deps':         list(task.deps),
+                'expl':         task.expl,
+                'resources':    task.resources,
+                'priority':     task.priority,
+                'family':       task.family,
+                'module':       task.module,
+                'params':       task.params,
+                'tracking_url': task.tracking_url,
+                'workers':      list(task.workers),
+                'batchable':    task.batchable,
+                'batch_id':     task.batch_id,
+            }
+        }
 
     @rpc_method()
     def announce_scheduling_failure(self, task_name, family, params, expl, owners, **kwargs):
