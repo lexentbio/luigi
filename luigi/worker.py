@@ -696,6 +696,7 @@ class Worker(object):
     def _add(self, task, is_complete=False):
         if self._config.task_limit is not None and len(self._scheduled_tasks) >= self._config.task_limit:
             logger.warning('Will not run %s or any dependencies due to exceeded task-limit of %d', task, self._config.task_limit)
+            return
             deps = None
             status = UNKNOWN
             runnable = False
