@@ -1,5 +1,6 @@
 import os
 import argparse
+import coloredlogs
 import logging
 import logging.config
 import sys
@@ -53,4 +54,5 @@ def luigid(argv=sys.argv[1:]):
             else:
                 print("Defaulting to basic logging; consider specifying logging_conf_file in luigi.cfg.")
                 logging.basicConfig(level=logging.INFO, format=luigi.process.get_log_format())
+        coloredlogs.install(level=logging.INFO)
         luigi.server.run(api_port=opts.port, address=opts.address, unix_socket=opts.unix_socket)
