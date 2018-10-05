@@ -4,7 +4,7 @@ Graph = (function() {
         "RUNNING":"#0044DD",
         "BATCH_RUNNING":"#BB00BB",
         "PENDING":"#EEBB00",
-        "DONE":"#00DD00",
+        "DONE":"#006400",
         "DISABLED":"#808080",
         "UNKNOWN":"#000000",
         "TRUNCATED":"#FF00FF"
