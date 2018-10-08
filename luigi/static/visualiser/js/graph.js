@@ -29,10 +29,20 @@ Graph = (function() {
     function nodeFromTask(task) {
         var deps = task.deps;
         deps.sort();
+
+        status = task.status
+        waiting = deps.some(function(element){
+            return element.startsWith('KubernetesWait')
+        });
+
+        if(waiting) {
+            status = 'RUNNING';
+        }
+
         return {
             name: task.name,
             taskId: task.taskId,
-            status: task.status,
+            status: status,
             trackingUrl: this.hashBase + task.taskId,
             deps: deps,
             params: task.params,
@@ -135,6 +145,7 @@ Graph = (function() {
         var rowSizes = computeDepth(nodes, nodeIndex);
 
         nodes = $.map(nodes, function(node) { return node.depth >= 0 ? node: null; });
+        nodes = $.map(nodes, function(node) { return node.name != 'KubernetesWait' ? node: null; });
 
         layoutNodes(nodes, rowSizes);
 
