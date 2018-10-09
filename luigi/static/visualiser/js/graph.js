@@ -147,7 +147,7 @@ Graph = (function() {
 
         var rowSizes = computeDepth(nodes, nodeIndex);
 
-        minor_deps = ['pluck']
+        minor_deps = ['pluck', 'ExternalSourceTask', 'UploadTask']
         $.each(nodes, function(index, node){
             /* Replace each minor dependency with it's dependencies. */
             node.deps = $.map(node.deps, function(dep){
