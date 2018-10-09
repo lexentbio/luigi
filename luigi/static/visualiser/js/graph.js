@@ -31,11 +31,14 @@ Graph = (function() {
         deps.sort();
 
         status = task.status
-        waiting = deps.some(function(element){
+        /* If a task has KubernetesWait in it's dependencies, 
+         * the task is running and waiting for kubernetes job to complete.
+         */
+        is_waiting = deps.some(function(element){
             return element.startsWith('KubernetesWait')
         });
 
-        if(waiting) {
+        if(is_waiting) {
             status = 'RUNNING';
         }
 
@@ -146,6 +149,7 @@ Graph = (function() {
 
         minor_deps = ['pluck']
         $.each(nodes, function(index, node){
+            /* Replace each minor dependency with it's dependencies. */
             node.deps = $.map(node.deps, function(dep){
                 is_minor_dep = minor_deps.some(function(m) {return dep.startsWith(m)})
                 if (is_minor_dep) {
@@ -160,7 +164,9 @@ Graph = (function() {
         })
 
         nodes = $.map(nodes, function(node) { return node.depth >= 0 ? node: null; });
+        /* Filter out KubernetesWait nodes from graph. */
         nodes = $.map(nodes, function(node) { return node.name != 'KubernetesWait' ? node: null; });
+        /* Filter out minor nodes from graph. */
         nodes = $.map(nodes, function(node) { return minor_deps.some(function(m) {return node.name == m}) ? null : node })
 
         layoutNodes(nodes, rowSizes);
