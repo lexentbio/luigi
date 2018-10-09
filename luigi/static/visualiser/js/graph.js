@@ -144,8 +144,24 @@ Graph = (function() {
 
         var rowSizes = computeDepth(nodes, nodeIndex);
 
+        minor_deps = ['pluck']
+        $.each(nodes, function(index, node){
+            node.deps = $.map(node.deps, function(dep){
+                is_minor_dep = minor_deps.some(function(m) {return dep.startsWith(m)})
+                if (is_minor_dep) {
+                    minor_node = nodes.find(function(node){
+                        return node.taskId == dep
+                    })
+                    return minor_node.deps
+                } else {
+                    return dep
+                }
+            }).flat()
+        })
+
         nodes = $.map(nodes, function(node) { return node.depth >= 0 ? node: null; });
         nodes = $.map(nodes, function(node) { return node.name != 'KubernetesWait' ? node: null; });
+        nodes = $.map(nodes, function(node) { return minor_deps.some(function(m) {return node.name == m}) ? null : node })
 
         layoutNodes(nodes, rowSizes);
 
