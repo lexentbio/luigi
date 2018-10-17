@@ -799,22 +799,21 @@ class Worker(object):
         self._scheduler.add_worker(self._id, self._worker_info)
 
     def _log_remote_tasks(self, get_work_response):
-        logger.debug("Done")
-        logger.debug("There are no more tasks to run at this time")
+        logger.debug("remote_tasks: There are no more tasks to run at this time")
         if get_work_response.running_tasks:
             for r in get_work_response.running_tasks:
-                logger.debug('%s is currently run by worker %s', r['task_id'], r['worker'])
+                logger.debug('remote_tasks: %s is currently run by worker %s', r['task_id'], r['worker'])
         elif get_work_response.n_pending_tasks:
             logger.debug(
-                "There are %s pending tasks possibly being run by other workers",
+                 "remote_tasks: There are %s pending tasks possibly being run by other workers",
                 get_work_response.n_pending_tasks)
             if get_work_response.n_unique_pending:
                 logger.debug(
-                    "There are %i pending tasks unique to this worker",
+                    "remote_tasks: There are %i pending tasks unique to this worker",
                     get_work_response.n_unique_pending)
             if get_work_response.n_pending_last_scheduled:
                 logger.debug(
-                    "There are %i pending tasks last scheduled by this worker",
+                    "remote_tasks: There are %i pending tasks last scheduled by this worker",
                     get_work_response.n_pending_last_scheduled)
 
     def _get_work_task_id(self, get_work_response):
