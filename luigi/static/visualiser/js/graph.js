@@ -31,7 +31,7 @@ Graph = (function() {
         deps.sort();
 
         status = task.status
-        /* If a task has KubernetesWait in it's dependencies, 
+        /* If a task has KubernetesWait in it's dependencies,
          * the task is running and waiting for kubernetes job to complete.
          */
         is_waiting = deps.some(function(element){
@@ -137,6 +137,13 @@ Graph = (function() {
         });
     }
 
+    /* Flatten an array */
+    function flatten(arr) {
+      return arr.reduce(function (flat, toFlatten) {
+        return flat.concat(Array.isArray(toFlatten) ? flatten(toFlatten) : toFlatten);
+      }, []);
+    }
+
     /* Parses a list of tasks to a graph format */
     function createGraph(tasks, hashBase) {
         if (tasks.length === 0) return {nodes: [], links: []};
@@ -148,19 +155,33 @@ Graph = (function() {
         var rowSizes = computeDepth(nodes, nodeIndex);
 
         minor_deps = ['pluck', 'ExternalSourceTask', 'UploadTask']
+
+        function non_minor_deps(dep) {
+            /* Return the next non-minor dependencies of a node in the dependency graph */
+            is_minor_dep = minor_deps.some(function(m) {return dep.startsWith(m)});
+            if (is_minor_dep){
+                minor_node = nodes.find(function(node){
+                    return node.taskId == dep;
+                })
+                major_dep = [];
+                $.each(minor_node.deps, function(i, d){
+                    major_dep = major_dep.concat(non_minor_deps(d));
+                });
+                major_dep = flatten(major_dep);
+                return major_dep;
+            } else{
+                return dep;
+            }
+        }
+
         $.each(nodes, function(index, node){
             /* Replace each minor dependency with it's dependencies. */
             node.deps = $.map(node.deps, function(dep){
-                is_minor_dep = minor_deps.some(function(m) {return dep.startsWith(m)})
-                if (is_minor_dep) {
-                    minor_node = nodes.find(function(node){
-                        return node.taskId == dep
-                    })
-                    return minor_node.deps
-                } else {
-                    return dep
-                }
-            }).flat()
+                return non_minor_deps(dep);
+            });
+            /* array.flat() is in development and is incompatible with a few browsers.
+            So, we use our own flatten method */
+            node.deps = flatten(node.deps);
         })
 
         nodes = $.map(nodes, function(node) { return node.depth >= 0 ? node: null; });
