@@ -154,7 +154,7 @@ Graph = (function() {
 
         var rowSizes = computeDepth(nodes, nodeIndex);
 
-        minor_deps = ['pluck', 'ExternalSourceTask', 'UploadTask']
+        minor_deps = ['pluck', 'ExternalSourceTask', 'UploadTask', 'Run']
 
         function non_minor_deps(dep) {
             /* Return the next non-minor dependencies of a node in the dependency graph */
