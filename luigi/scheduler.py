@@ -22,6 +22,7 @@ See :doc:`/central_scheduler` for more info.
 """
 
 import collections
+import importlib
 import inspect
 import json
 
@@ -146,6 +147,12 @@ class scheduler(Config):
     record_task_history = parameter.BoolParameter(default=False)
 
     prune_on_get_work = parameter.BoolParameter(default=False)
+
+    # [sawyer] Custom task history recorder
+    task_history_recorder = parameter.Parameter(
+        default='',
+        description='Class path to custom task history recorder')
+    # [sawyer]
 
     def _get_retry_policy(self):
         return RetryPolicy(self.retry_count, self.disable_hard_timeout, self.disable_window)
@@ -674,6 +681,20 @@ class Scheduler(object):
 
         if task_history_impl:
             self._task_history = task_history_impl
+
+        # [sawyer] Custom task history recorders
+        elif self._config.task_history_recorder:
+            try:
+                mod_name, cls_name = self._config.task_history_recorder.rsplit('.', 1)
+                mod = importlib.import_module(mod_name)
+                cls = getattr(mod, cls_name)
+                self._task_history = cls()
+            except Exception as e:
+                # We don't want to interrupt the scheduler, so catch all exceptions
+                logger.warning("Task history recorder '{}' could not be imported.\n{}".format(
+                    self._config.task_history_recorder, str(e)))
+        # [sawyer]
+
         elif self._config.record_task_history:
             from luigi import db_task_history  # Needs sqlalchemy, thus imported here
             self._task_history = db_task_history.DbTaskHistory()
@@ -840,6 +861,11 @@ class Scheduler(object):
         task_started_a_run = status in (DONE, FAILED, RUNNING)
         running_on_this_worker = task.worker_running == worker_id
         if task_is_not_running or (task_started_a_run and running_on_this_worker) or new_deps:
+            # [sawyer] If task has deps/new_deps and task_history supports deps, record task info
+            if (deps or new_deps) and hasattr(self._task_history, 'task_new_deps'):
+                self._task_history.task_new_deps(task, deps, new_deps)
+            # [sawyer]
+
             # don't allow re-scheduling of task while it is running, it must either fail or succeed on the worker actually running it
             if status != task.status or status == PENDING:
                 # Update the DB only if there was a acctual change, to prevent noise.
