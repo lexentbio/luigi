@@ -39,6 +39,8 @@ with open('README.rst') as fobj:
 install_requires = [
     'tornado>=4.0,<5',
     'python-daemon<3.0',
+    'coreapi',
+    'openapi-codec',
 ]
 
 if os.environ.get('READTHEDOCS', None) == 'True':
@@ -50,7 +52,7 @@ if os.environ.get('READTHEDOCS', None) == 'True':
 
 setup(
     name='luigi',
-    version='2.7.2.post4',
+    version='2.8.0.post2',
     description='Workflow mgmgt + task scheduling + dependency resolution',
     long_description=long_description,
     author='The Luigi Authors',
