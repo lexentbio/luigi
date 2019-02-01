@@ -12,7 +12,7 @@ import openapi_codec
 from luigi.task_history import TaskHistory
 
 
-logger = logging.getLogger('sawyer.task_history')
+logger = logging.getLogger('luigi-interface')
 
 
 class SawyerServerConnection:
