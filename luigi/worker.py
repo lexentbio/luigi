@@ -1044,6 +1044,7 @@ class Worker(object):
            will be rescheduled and dependencies added,
         3. child process dies: we need to catch this separately.
         """
+        self._idle_since = None
         while True:
             self._purge_children()  # Deal with subprocess failures
 
@@ -1190,7 +1191,6 @@ class Worker(object):
                     else:
                         break
                 else:
-                    self._idle_since = None
                     self._handle_next_task()
                     continue
 
