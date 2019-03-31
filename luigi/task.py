@@ -767,6 +767,27 @@ class ExternalTask(Task):
     run = None
 
 
+class AsyncTask(Task):
+    """
+    Task that runs asynchronously and does not consume a worker process.
+    """
+
+    def pre_submit(self):
+        pass
+
+    def post_submit(self, error):
+        pass
+
+    def run(self):
+        raise RuntimeError("task.run should not be called on AsyncTask.")
+
+    def submit(self):
+        raise NotImplementedError("Implement in subclass.")
+
+    def check_complete(self):
+        raise NotImplementedError("Implement in subclass.")
+
+
 def externalize(taskclass_or_taskobject):
     """
     Returns an externalized version of a Task. You may both pass an
