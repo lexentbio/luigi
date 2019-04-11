@@ -29,6 +29,7 @@ class Event(object):
     #: for the task to report progress, metadata or any generic info so that
     #: event handler listening for this can keep track of the progress of running task.
     PROGRESS = "event.core.progress"
+    SUBMIT = "event.core.submit"
     FAILURE = "event.core.failure"
     SUCCESS = "event.core.success"
     PROCESSING_TIME = "event.core.processing_time"

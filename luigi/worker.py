@@ -31,6 +31,7 @@ ways between versions. The exception is the exception types and the
 import collections
 import datetime
 import getpass
+import heapq 
 import importlib
 import logging
 import multiprocessing
@@ -56,7 +57,7 @@ from luigi import six
 from luigi import notifications
 from luigi.event import Event
 from luigi.task_register import load_task
-from luigi.scheduler import DISABLED, DONE, FAILED, PENDING, UNKNOWN, Scheduler, RetryPolicy
+from luigi.scheduler import DISABLED, DONE, FAILED, PENDING, RUNNING, UNKNOWN, Scheduler, RetryPolicy
 from luigi.scheduler import WORKER_STATE_ACTIVE, WORKER_STATE_DISABLED
 from luigi.target import Target
 from luigi.task import Task, flatten, getpaths, Config
@@ -88,6 +89,8 @@ _WAIT_INTERVAL_EPS = 0.00001
 def _is_external(task):
     return task.run is None or task.run == NotImplemented
 
+def _is_async(task):
+    return callable(getattr(task, 'poll_status', None))
 
 def _get_retry_policy_dict(task):
     return RetryPolicy(task.retry_count, task.disable_hard_timeout, task.disable_window_seconds)._asdict()
@@ -198,7 +201,13 @@ class TaskProcess(multiprocessing.Process):
             else:
                 with self._forward_attributes():
                     new_deps = self._run_get_new_deps()
-                status = DONE if not new_deps else PENDING
+
+                if new_deps:
+                    status = PENDING
+                elif _is_async(self.task):
+                    status = RUNNING
+                else:
+                    status = DONE
 
             if new_deps:
                 logger.info(
@@ -211,6 +220,13 @@ class TaskProcess(multiprocessing.Process):
                 logger.info('[pid %s] Worker %s done      %s', os.getpid(),
                             self.worker_id, self.task)
                 self.task.trigger_event(Event.SUCCESS, self.task)
+            elif status == RUNNING:
+                self.task.trigger_event(
+                    Event.PROCESSING_TIME, self.task, time.time() - t0)
+                expl = self.task.on_submit()
+                logger.info('[pid %s] Worker %s submitted      %s', os.getpid(),
+                            self.worker_id, self.task)
+                self.task.trigger_event(Event.SUBMIT, self.task)
 
         except KeyboardInterrupt:
             raise
@@ -285,6 +301,54 @@ class ContextManagedTaskProcess(TaskProcess):
         else:
             super(ContextManagedTaskProcess, self).run()
 
+class AsyncStatusCheckProcess(TaskProcess):
+    def run(self):
+        logger.info('[pid %s] Worker %s checking status   %s', os.getpid(), self.worker_id, self.task)
+
+        if self.use_multiprocessing:
+            # Need to have different random seeds if running in separate processes
+            random.seed((os.getpid(), time.time()))
+
+        status = FAILED
+        expl = ''
+        missing = []
+        new_deps = []
+        try:
+            self.task.trigger_event(Event.STATUS_CHECK, self.task)
+            t0 = time.time()
+            status = None
+
+            with self._forward_attributes():
+                result = self.task.check_status()
+
+                if result:
+                    status = DONE
+                else:
+                    status = RUNNING
+
+            if status == DONE:
+                self.task.trigger_event(
+                    Event.PROCESSING_TIME, self.task, time.time() - t0)
+                expl = self.task.on_success()
+                logger.info('[pid %s] Worker %s done      %s', os.getpid(),
+                            self.worker_id, self.task)
+                self.task.trigger_event(Event.SUCCESS, self.task)
+            elif status == RUNNING:
+                self.task.trigger_event(
+                    Event.PROCESSING_TIME, self.task, time.time() - t0)
+
+        except KeyboardInterrupt:
+            raise
+        except BaseException as ex:
+            status = FAILED
+            logger.exception("[pid %s] Worker %s failed    %s", os.getpid(), self.worker_id, self.task)
+            self.task.trigger_event(Event.FAILURE, self.task, ex)
+            raw_error_message = self.task.on_failure(ex)
+            expl = raw_error_message
+
+        finally:
+            self.result_queue.put(
+                (self.task.task_id, status, expl, missing, new_deps))
 
 class TaskStatusReporter(object):
     """
@@ -553,6 +617,7 @@ class Worker(object):
         # Keep info about what tasks are running (could be in other processes)
         self._task_result_queue = multiprocessing.Queue()
         self._running_tasks = {}
+        self._async_running_tasks = []
         self._idle_since = None
 
         # Stuff for execution_summary
@@ -1087,7 +1152,10 @@ class Worker(object):
                            assistant=self._assistant,
                            retry_policy_dict=_get_retry_policy_dict(task))
 
-            self._running_tasks.pop(task_id)
+            if status == DONE:
+                self._running_tasks.pop(task_id)
+            elif status == RUNNING:
+                heapq.heappush(self._async_running_tasks, (time.time() + getattr(task, 'poll_frequency', self._config.wait_interval), task_id))
 
             # re-add task to reschedule missing dependencies
             if missing:
@@ -1171,9 +1239,14 @@ class Worker(object):
         self._add_worker()
 
         while True:
-            while len(self._running_tasks) >= self.worker_processes > 0:
+            while len(self._running_tasks) - len(self._async_running_tasks) >= self.worker_processes > 0:
                 logger.debug('%d running tasks, waiting for next task to finish', len(self._running_tasks))
                 self._handle_next_task()
+
+            if len(self._async_running_tasks) and time.time() >= self._async_running_tasks[0][0]:
+                _, task_id = heapq.heappop(self._async_running_tasks)
+                
+                continue
 
             get_work_response = self._get_work()
 
