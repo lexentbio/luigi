@@ -1068,12 +1068,42 @@ class Worker(object):
             # Run in the same process
             task_process.run()
 
+    def _check_task_status(self, task_id):
+        if task_id not in self._running_tasks:
+            logger.warning('Got task id {} which isnt running.'.format(task_id))
+            next(self._sleeper())
+            return 
+
+        task = self._scheduled_tasks[task_id]
+
+        task_process = self._create_task_status_check_process(task)
+
+        self._running_tasks[task_id] = task_process
+
+        if task_process.use_multiprocessing:
+            with fork_lock:
+                task_process.start()
+        else:
+            # Run in the same process
+            task_process.run()
+
     def _create_task_process(self, task):
         message_queue = multiprocessing.Queue() if task.accepts_messages else None
         reporter = TaskStatusReporter(self._scheduler, task.task_id, self._id, message_queue)
         use_multiprocessing = self._config.force_multiprocessing or bool(self.worker_processes > 1)
         return ContextManagedTaskProcess(
             self._config.task_process_context,
+            task, self._id, self._task_result_queue, reporter,
+            use_multiprocessing=use_multiprocessing,
+            worker_timeout=self._config.timeout,
+            check_unfulfilled_deps=self._config.check_unfulfilled_deps,
+        )
+
+    def _create_task_status_check_process(self, task):
+        message_queue = multiprocessing.Queue() if task.accepts_messages else None
+        reporter = TaskStatusReporter(self._scheduler, task.task_id, self._id, message_queue)
+        use_multiprocessing = self._config.force_multiprocessing or bool(self.worker_processes > 1)
+        return AsyncStatusCheckProcess(
             task, self._id, self._task_result_queue, reporter,
             use_multiprocessing=use_multiprocessing,
             worker_timeout=self._config.timeout,
@@ -1152,10 +1182,10 @@ class Worker(object):
                            assistant=self._assistant,
                            retry_policy_dict=_get_retry_policy_dict(task))
 
-            if status == DONE:
-                self._running_tasks.pop(task_id)
-            elif status == RUNNING:
+            if status == RUNNING:
                 heapq.heappush(self._async_running_tasks, (time.time() + getattr(task, 'poll_frequency', self._config.wait_interval), task_id))
+            else:
+                self._running_tasks.pop(task_id)
 
             # re-add task to reschedule missing dependencies
             if missing:
@@ -1240,12 +1270,12 @@ class Worker(object):
 
         while True:
             while len(self._running_tasks) - len(self._async_running_tasks) >= self.worker_processes > 0:
-                logger.debug('%d running tasks, waiting for next task to finish', len(self._running_tasks))
+                logger.debug('%d async tasks / %d running tasks, waiting for next task to finish', len(self._async_running_tasks), len(self._running_tasks))
                 self._handle_next_task()
 
             if len(self._async_running_tasks) and time.time() >= self._async_running_tasks[0][0]:
                 _, task_id = heapq.heappop(self._async_running_tasks)
-                
+                self._check_task_status(task_id)
                 continue
 
             get_work_response = self._get_work()
