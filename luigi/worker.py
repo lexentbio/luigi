@@ -30,7 +30,6 @@ ways between versions. The exception is the exception types and the
 
 import collections
 import datetime
-import functools
 import getpass
 import importlib
 import logging
@@ -56,6 +55,7 @@ from luigi import six
 
 from luigi import notifications
 from luigi.event import Event
+
 from luigi.task_register import load_task
 from luigi.scheduler import DISABLED, DONE, FAILED, PENDING, UNKNOWN, Scheduler, RetryPolicy
 from luigi.scheduler import WORKER_STATE_ACTIVE, WORKER_STATE_DISABLED
@@ -106,24 +106,6 @@ GetWorkResponse = collections.namedtuple('GetWorkResponse', (
     'n_pending_last_scheduled',
     'worker_state',
 ))
-
-
-def ignore_exceptions(func):
-    """
-    Ignore all exceptions.
-
-    This decorator is useful when running code in the main worker process. When
-    calling methods on tasks, we don't want errors to stop the worker.
-    """
-
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as ex:
-            logger.error(f"Error in {func.__name__}: {ex}")
-
-    return wrapped
 
 
 class TaskProcess(multiprocessing.Process):
@@ -476,6 +458,9 @@ class worker(Config):
                                      'applied as a context manager around its run() call, so this can be '
                                      'used for obtaining high level customizable monitoring or logging of '
                                      'each individual Task run.')
+    max_concurrent_async_tasks = Parameter(default=10000,
+                                           description='Max number of async tasks to submit concurrently',
+                                           config_path=dict(section='core', name='worker-max-concurrent-async-tasks'))
 
 
 class KeepAliveThread(threading.Thread):
@@ -533,9 +518,8 @@ class Worker(object):
             scheduler = Scheduler()
 
         self.worker_processes = int(worker_processes)
-        self._worker_info = self._generate_worker_info()
-
         self._config = worker(**kwargs)
+        self._worker_info = self._generate_worker_info()
 
         worker_id = worker_id or self._config.id or 'Worker(%s)' % ', '.join(['%s=%s' % (k, v) for k, v in self._worker_info])
 
@@ -631,8 +615,7 @@ class Worker(object):
         # Generate as much info as possible about the worker
         # Some of these calls might not be available on all OS's
         args = [('salt', '%09d' % random.randrange(0, 999999999)),
-                # ('workers', self.worker_processes)]
-                ('workers', 10000)] # TODO: change from 10000 to param
+                ('workers', self._config.max_concurrent_async_tasks)]
         try:
             args += [('host', socket.gethostname())]
         except BaseException:
@@ -1007,7 +990,6 @@ class Worker(object):
             worker_state=r.get('worker_state', WORKER_STATE_ACTIVE),
         )
 
-    @ignore_exceptions
     def _run_async_task(self, task):
         # Verify that all deps are fulfilled.
         if self._config.check_unfulfilled_deps and not _is_external(task):
@@ -1033,12 +1015,11 @@ class Worker(object):
                 worker=self._id,
                 task_id=task.task_id,
                 status=FAILED,
-                expl="Failure in submitting task",
+                expl=f"Failure in submitting task: {str(ex)}",
                 runnable=True)
         else:
             self._async_running_tasks[task.task_id] = task
 
-    @ignore_exceptions
     def _check_async_tasks(self):
         async_tasks = list(self._async_running_tasks.values())
         for task in async_tasks:
@@ -1054,11 +1035,24 @@ class Worker(object):
                 expl = str(ex)
                 error = ex
 
+            # Task finished (successfully or with failure)
             if status is not None:
                 try:
                     task.post_submit(error)
                 except Exception as ex:
                     pass
+
+                # Trigger events
+                if status == DONE:
+                    if hasattr(task, '_start_time'):
+                        task.trigger_event(Event.PROCESSING_TIME, task, time.time() - task._start_time)
+                    expl = task.on_success()
+                    logger.info('Worker %s done async %s', self._id, task)
+                    task.trigger_event(Event.SUCCESS, task)
+                elif status == FAILED:
+                    task.trigger_event(Event.FAILURE, task, error)
+                    logger.info('Worker %s failed async %s', self._id, task)
+                    expl = task.on_failure(error)
 
                 # Notify scheduler about task status
                 self._add_task(
@@ -1068,12 +1062,7 @@ class Worker(object):
                     expl=expl,
                     runnable=runnable)
 
-                # Trigger events
-                if status == DONE:
-                    if hasattr(task, '_start_time'):
-                        task.trigger_event(Event.PROCESSING_TIME, task, time.time() - task._start_time)
-                        task.trigger_event(Event.SUCCESS, task)
-
+                # Remove task from list of running tasks and update run status
                 self._async_running_tasks.pop(task.task_id)
                 self.run_succeeded &= (status == DONE)
 
@@ -1293,11 +1282,11 @@ class Worker(object):
                 if num_async_running > 0:
                     # Scheduler has no work to do, so keep checking async tasks
                     # until at least one finishes before asking scheduler again
+                    logger.debug('%d submitted async tasks, waiting for next task to finish',
+                                 len(self._async_running_tasks))
                     while len(self._async_running_tasks) >= num_async_running:
-                        six.next(sleeper)
-                        logger.debug('%d running async tasks, waiting for next task to finish',
-                                     len(self._async_running_tasks))
                         self._check_async_tasks()
+                        six.next(sleeper)
                     continue
                 elif not self._stop_requesting_work:
                     self._log_remote_tasks(get_work_response)
