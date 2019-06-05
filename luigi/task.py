@@ -772,19 +772,13 @@ class AsyncTask(Task):
     Task that runs asynchronously and does not consume a worker process.
     """
 
-    def pre_submit(self):
-        pass
-
-    def post_submit(self, error):
-        pass
-
     def run(self):
         raise RuntimeError("task.run should not be called on AsyncTask.")
 
-    def submit(self):
+    def submit_task(self):
         raise NotImplementedError("Implement in subclass.")
 
-    def check_complete(self):
+    def check_task_complete(self):
         raise NotImplementedError("Implement in subclass.")
 
 

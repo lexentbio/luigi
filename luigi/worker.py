@@ -458,7 +458,7 @@ class worker(Config):
                                      'applied as a context manager around its run() call, so this can be '
                                      'used for obtaining high level customizable monitoring or logging of '
                                      'each individual Task run.')
-    max_concurrent_async_tasks = Parameter(default=10000,
+    max_concurrent_async_tasks = IntParameter(default=10000,
                                            description='Max number of async tasks to submit concurrently',
                                            config_path=dict(section='core', name='worker-max-concurrent-async-tasks'))
 
@@ -1002,14 +1002,8 @@ class Worker(object):
         try:
             task.trigger_event(Event.START, task)
             task._start_time = time.time()
-            task.pre_submit()
-            task.submit()
+            task.submit_task()
         except Exception as ex:
-            try:
-                task.post_submit(ex)
-            except Exception as ex2:
-                pass
-
             # Notify scheduler that task submission failed
             self._add_task(
                 worker=self._id,
@@ -1028,20 +1022,14 @@ class Worker(object):
             expl = ''
 
             try:
-                complete = task.task_complete()
+                complete = task.check_task_completed()
                 status = DONE if complete else None
             except Exception as ex:
                 status = FAILED
-                expl = str(ex)
-                error = ex
+                error = str(ex)
 
             # Task finished (successfully or with failure)
             if status is not None:
-                try:
-                    task.post_submit(error)
-                except Exception as ex:
-                    pass
-
                 # Trigger events
                 if status == DONE:
                     if hasattr(task, '_start_time'):
@@ -1050,9 +1038,9 @@ class Worker(object):
                     logger.info('Worker %s done async %s', self._id, task)
                     task.trigger_event(Event.SUCCESS, task)
                 elif status == FAILED:
-                    task.trigger_event(Event.FAILURE, task, error)
-                    logger.info('Worker %s failed async %s', self._id, task)
                     expl = task.on_failure(error)
+                    task.trigger_event(Event.FAILURE, task, expl)
+                    logger.info('Worker %s failed async %s', self._id, task)
 
                 # Notify scheduler about task status
                 self._add_task(
