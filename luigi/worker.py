@@ -951,6 +951,7 @@ class Worker(object):
             logger.debug("Checking if tasks are still pending")
             r = self._scheduler.count_pending(worker=self._id)
 
+
         running_tasks = r['running_tasks']
         task_id = self._get_work_task_id(r)
 
@@ -1004,6 +1005,7 @@ class Worker(object):
             task._start_time = time.time()
             task.submit_task()
         except Exception as ex:
+            logger.error("Error in submitting task: %s %s", task.task_id, ex)
             # Notify scheduler that task submission failed
             self._add_task(
                 worker=self._id,
@@ -1022,9 +1024,10 @@ class Worker(object):
             expl = ''
 
             try:
-                complete = task.check_task_completed()
+                complete = task.check_task_complete()
                 status = DONE if complete else None
             except Exception as ex:
+                logger.error("Error in checking task status: %s %s", task.task_id, ex)
                 status = FAILED
                 error = str(ex)
 
