@@ -29,23 +29,10 @@ Graph = (function() {
     function nodeFromTask(task) {
         var deps = task.deps;
         deps.sort();
-
-        status = task.status
-        /* If a task has KubernetesWait in it's dependencies,
-         * the task is running and waiting for kubernetes job to complete.
-         */
-        is_waiting = deps.some(function(element){
-            return element.startsWith('KubernetesWait')
-        });
-
-        if(is_waiting) {
-            status = 'RUNNING';
-        }
-
         return {
             name: task.name,
             taskId: task.taskId,
-            status: status,
+            status: task.status,
             trackingUrl: this.hashBase + task.taskId,
             deps: deps,
             params: task.params,
@@ -137,13 +124,6 @@ Graph = (function() {
         });
     }
 
-    /* Flatten an array */
-    function flatten(arr) {
-      return arr.reduce(function (flat, toFlatten) {
-        return flat.concat(Array.isArray(toFlatten) ? flatten(toFlatten) : toFlatten);
-      }, []);
-    }
-
     /* Parses a list of tasks to a graph format */
     function createGraph(tasks, hashBase) {
         if (tasks.length === 0) return {nodes: [], links: []};
@@ -154,41 +134,7 @@ Graph = (function() {
 
         var rowSizes = computeDepth(nodes, nodeIndex);
 
-        minor_deps = ['pluck', 'ExternalSourceTask', 'UploadTask', 'Run']
-
-        function non_minor_deps(dep) {
-            /* Return the next non-minor dependencies of a node in the dependency graph */
-            is_minor_dep = minor_deps.some(function(m) {return dep.startsWith(m)});
-            if (is_minor_dep){
-                minor_node = nodes.find(function(node){
-                    return node.taskId == dep;
-                })
-                major_dep = [];
-                $.each(minor_node.deps, function(i, d){
-                    major_dep = major_dep.concat(non_minor_deps(d));
-                });
-                major_dep = flatten(major_dep);
-                return major_dep;
-            } else{
-                return dep;
-            }
-        }
-
-        $.each(nodes, function(index, node){
-            /* Replace each minor dependency with it's dependencies. */
-            node.deps = $.map(node.deps, function(dep){
-                return non_minor_deps(dep);
-            });
-            /* array.flat() is in development and is incompatible with a few browsers.
-            So, we use our own flatten method */
-            node.deps = flatten(node.deps);
-        })
-
         nodes = $.map(nodes, function(node) { return node.depth >= 0 ? node: null; });
-        /* Filter out KubernetesWait nodes from graph. */
-        nodes = $.map(nodes, function(node) { return node.name != 'KubernetesWait' ? node: null; });
-        /* Filter out minor nodes from graph. */
-        nodes = $.map(nodes, function(node) { return minor_deps.some(function(m) {return node.name == m}) ? null : node })
 
         layoutNodes(nodes, rowSizes);
 
